@@ -1,10 +1,39 @@
 import { NextRequest, NextResponse } from 'next/server'
-import Anthropic from '@anthropic-ai/sdk'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 30
 
-const client = new Anthropic()
+function generateMockQuiz(content: string) {
+  const words = content.split(/\s+/).slice(0, 20).join(' ')
+  return {
+    questions: [
+      {
+        question: `다음 중 본문의 내용과 일치하는 것은? ("${words}...")`,
+        options: ['본문에서 설명한 핵심 개념이다', '본문과 관련 없는 내용이다', '본문에서 부정한 내용이다', '본문에서 언급되지 않았다'],
+        correctIndex: 0,
+        explanation: '본문의 핵심 내용을 잘 파악하는 것이 중요합니다.',
+      },
+      {
+        question: '이 자료의 주요 목적은 무엇인가?',
+        options: ['개념 설명', '문제 제기', '비교 분석', '실험 결과 보고'],
+        correctIndex: 0,
+        explanation: '자료의 전체적인 흐름을 파악해보세요.',
+      },
+      {
+        question: '본문을 올바르게 이해한 사람은?',
+        options: ['핵심 내용을 정확히 파악한 학생', '세부 내용만 암기한 학생', '다른 주제와 혼동한 학생', '본문을 읽지 않은 학생'],
+        correctIndex: 0,
+        explanation: '핵심과 세부 내용을 균형있게 이해하는 것이 중요합니다.',
+      },
+      {
+        question: '이 내용을 공부한 후 할 수 있는 것은?',
+        options: ['관련 개념을 설명할 수 있다', '전혀 다른 분야에 적용할 수 있다', '더 이상 공부할 필요가 없다', '본문의 내용이 틀렸다고 주장할 수 있다'],
+        correctIndex: 0,
+        explanation: '학습의 목표는 개념을 이해하고 설명할 수 있는 것입니다.',
+      },
+    ],
+  }
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -14,8 +43,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '내용이 필요합니다' }, { status: 400 })
     }
 
+    // If no API key, return mock quiz for local development
+    if (!process.env.ANTHROPIC_API_KEY) {
+      return NextResponse.json(generateMockQuiz(content))
+    }
+
+    const Anthropic = (await import('@anthropic-ai/sdk')).default
+    const client = new Anthropic()
+
     const message = await client.messages.create({
-      model: 'claude-opus-4-6',
+      model: 'claude-sonnet-4-20250514',
       max_tokens: 1200,
       messages: [
         {
