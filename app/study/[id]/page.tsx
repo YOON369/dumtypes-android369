@@ -23,7 +23,77 @@ interface QuizQuestion {
   explanation: string
 }
 
+interface SubjectProgress {
+  completedCards: string[]
+  stars: number
+  bestScore: number
+}
+
+interface Progress {
+  totalXp: number
+  level: number
+  streak: number
+  lastStudied: string | null
+  subjects: Record<string, SubjectProgress>
+  badges: string[]
+}
+
+const DEFAULT_PROGRESS: Progress = {
+  totalXp: 0, level: 1, streak: 0, lastStudied: null, subjects: {}, badges: [],
+}
+
 type Mode = 'read' | 'flashcard' | 'quiz'
+
+/* ─── localStorage helpers ─── */
+function loadProgress(): Progress {
+  if (typeof window === 'undefined') return DEFAULT_PROGRESS
+  try {
+    const raw = localStorage.getItem('study-progress')
+    return raw ? { ...DEFAULT_PROGRESS, ...JSON.parse(raw) } : DEFAULT_PROGRESS
+  } catch {
+    return DEFAULT_PROGRESS
+  }
+}
+
+function saveProgress(progress: Progress) {
+  if (typeof window === 'undefined') return
+  localStorage.setItem('study-progress', JSON.stringify(progress))
+}
+
+function calcLevel(totalXp: number): number {
+  return Math.floor(Math.sqrt(totalXp / 50)) + 1
+}
+
+/* ─── Mock quiz generator ─── */
+function generateMockQuiz(content: string): QuizQuestion[] {
+  const words = content.split(/\s+/).slice(0, 15).join(' ')
+  return [
+    {
+      question: `다음 중 본문의 내용과 일치하는 것은? ("${words}...")`,
+      options: ['본문에서 설명한 핵심 개념이다', '본문과 관련 없는 내용이다', '본문에서 부정한 내용이다', '본문에서 언급되지 않았다'],
+      correctIndex: 0,
+      explanation: '본문의 핵심 내용을 잘 파악하는 것이 중요합니다.',
+    },
+    {
+      question: '이 자료의 주요 목적은 무엇인가?',
+      options: ['개념 설명', '문제 제기', '비교 분석', '실험 결과 보고'],
+      correctIndex: 0,
+      explanation: '자료의 전체적인 흐름을 파악해보세요.',
+    },
+    {
+      question: '본문을 올바르게 이해한 사람은?',
+      options: ['핵심 내용을 정확히 파악한 학생', '세부 내용만 암기한 학생', '다른 주제와 혼동한 학생', '본문을 읽지 않은 학생'],
+      correctIndex: 0,
+      explanation: '핵심과 세부 내용을 균형있게 이해하는 것이 중요합니다.',
+    },
+    {
+      question: '이 내용을 공부한 후 할 수 있는 것은?',
+      options: ['관련 개념을 설명할 수 있다', '전혀 다른 분야에 적용할 수 있다', '더 이상 공부할 필요가 없다', '본문의 내용이 틀렸다고 주장할 수 있다'],
+      correctIndex: 0,
+      explanation: '학습의 목표는 개념을 이해하고 설명할 수 있는 것입니다.',
+    },
+  ]
+}
 
 /* ─── XP floating text ─── */
 function XpPop({ amount, x, y, onDone }: { amount: number; x: number; y: number; onDone: () => void }) {
@@ -99,16 +169,18 @@ export default function StudyPage({ params }: { params: { id: string } }) {
   /* ─── Load data ─── */
   useEffect(() => {
     async function load() {
-      const [sr, pr] = await Promise.all([
-        fetch(`/api/subjects/${params.id}`),
-        fetch('/api/progress'),
-      ])
-      const sd = await sr.json()
-      const pd = await pr.json()
-      setSubject(sd.subject)
-      setCards(sd.cards || [])
-      if (pd.subjects?.[params.id]?.completedCards) {
-        setCompletedCards(new Set(pd.subjects[params.id].completedCards))
+      try {
+        const res = await fetch(`/api/subjects/${params.id}`)
+        const sd = await res.json()
+        setSubject(sd.subject)
+        setCards(sd.cards || [])
+      } catch {
+        // Fallback will show "not found"
+      }
+
+      const progress = loadProgress()
+      if (progress.subjects?.[params.id]?.completedCards) {
+        setCompletedCards(new Set(progress.subjects[params.id].completedCards))
       }
       setLoading(false)
     }
@@ -122,7 +194,7 @@ export default function StudyPage({ params }: { params: { id: string } }) {
     }
   }, [mode, idx]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function loadQuiz(content: string) {
+  function loadQuiz(content: string) {
     setQuizLoading(true)
     setQuizQuestions([])
     setQuizIdx(0)
@@ -130,22 +202,15 @@ export default function StudyPage({ params }: { params: { id: string } }) {
     setShowExplanation(false)
     setIsCorrect(null)
 
-    try {
-      const res = await fetch('/api/quiz', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content }),
-      })
-      const data = await res.json()
-      setQuizQuestions(data.questions || [])
-    } catch (e) {
-      console.error(e)
-    }
-    setQuizLoading(false)
+    // Generate quiz client-side (mock)
+    setTimeout(() => {
+      setQuizQuestions(generateMockQuiz(content))
+      setQuizLoading(false)
+    }, 500)
   }
 
   /* ─── Award XP ─── */
-  const awardXp = useCallback(async (amount: number, screenX?: number, screenY?: number) => {
+  const awardXp = useCallback((amount: number, screenX?: number, screenY?: number) => {
     setSessionXp(prev => prev + amount)
 
     // Floating XP text
@@ -155,40 +220,65 @@ export default function StudyPage({ params }: { params: { id: string } }) {
       { id: popId, amount, x: screenX ?? window.innerWidth / 2, y: screenY ?? 80 },
     ])
 
-    // Persist
-    try {
-      const pr = await fetch('/api/progress')
-      const progress = await pr.json()
-      const prevLevel = progress.level
-      const newXp = (progress.totalXp || 0) + amount
-      const res = await fetch('/api/progress', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...progress,
-          totalXp: newXp,
-          subjects: {
-            ...progress.subjects,
-            [params.id]: {
-              completedCards: Array.from(completedCards),
-              stars: progress.subjects?.[params.id]?.stars || 0,
-              bestScore: progress.subjects?.[params.id]?.bestScore || 0,
-            },
-          },
-        }),
-      })
-      const updated = await res.json()
-      if (updated.level > prevLevel) setShowLevelUp(updated.level)
-    } catch (e) {
-      console.error(e)
+    // Persist to localStorage
+    const progress = loadProgress()
+    const prevLevel = progress.level
+    const newXp = (progress.totalXp || 0) + amount
+    const newLevel = calcLevel(newXp)
+
+    const updated: Progress = {
+      ...progress,
+      totalXp: newXp,
+      level: newLevel,
+      lastStudied: new Date().toISOString(),
+      subjects: {
+        ...progress.subjects,
+        [params.id]: {
+          completedCards: Array.from(completedCards),
+          stars: progress.subjects?.[params.id]?.stars || 0,
+          bestScore: progress.subjects?.[params.id]?.bestScore || 0,
+        },
+      },
     }
+
+    // Streak logic
+    const today = new Date().toDateString()
+    const lastStudied = progress.lastStudied ? new Date(progress.lastStudied).toDateString() : null
+    const yesterday = new Date(Date.now() - 86400000).toDateString()
+    if (lastStudied !== today) {
+      if (lastStudied === yesterday) {
+        updated.streak = (progress.streak || 0) + 1
+      } else if (!lastStudied) {
+        updated.streak = 1
+      } else {
+        updated.streak = 1
+      }
+    }
+
+    saveProgress(updated)
+    if (newLevel > prevLevel) setShowLevelUp(newLevel)
   }, [completedCards, params.id])
 
-  const markDone = useCallback(async (cardId: string) => {
+  const markDone = useCallback((cardId: string) => {
     if (completedCards.has(cardId)) return
-    setCompletedCards(prev => new Set([...prev, cardId]))
-    await awardXp(10)
-  }, [completedCards, awardXp])
+    setCompletedCards(prev => {
+      const next = new Set([...prev, cardId])
+      // Also update localStorage immediately
+      const progress = loadProgress()
+      progress.subjects = {
+        ...progress.subjects,
+        [params.id]: {
+          ...progress.subjects?.[params.id],
+          completedCards: Array.from(next),
+          stars: progress.subjects?.[params.id]?.stars || 0,
+          bestScore: progress.subjects?.[params.id]?.bestScore || 0,
+        },
+      }
+      saveProgress(progress)
+      return next
+    })
+    awardXp(10)
+  }, [completedCards, awardXp, params.id])
 
   /* ─── Navigation ─── */
   const goNext = useCallback(() => {
@@ -233,7 +323,7 @@ export default function StudyPage({ params }: { params: { id: string } }) {
   }
 
   /* ─── Quiz answer ─── */
-  async function handleAnswer(optIdx: number) {
+  function handleAnswer(optIdx: number) {
     if (selected !== null) return
     setSelected(optIdx)
     const q = quizQuestions[quizIdx]
@@ -247,7 +337,7 @@ export default function StudyPage({ params }: { params: { id: string } }) {
       const bonus = Math.min(streak, 4) * 5
       const gained = 20 + bonus
       setStreak(s => s + 1)
-      await awardXp(gained)
+      awardXp(gained)
     } else {
       setHearts(h => Math.max(0, h - 1))
       setStreak(0)
@@ -425,7 +515,7 @@ export default function StudyPage({ params }: { params: { id: string } }) {
             {quizLoading ? (
               <div className="flex flex-col items-center justify-center h-full gap-4">
                 <div className="text-5xl animate-spin">⚡</div>
-                <p className="text-purple-400 animate-pulse">AI가 퀴즈를 만들고 있어요...</p>
+                <p className="text-purple-400 animate-pulse">퀴즈를 만들고 있어요...</p>
                 <p className="text-gray-600 text-sm">잠시만 기다려주세요</p>
               </div>
             ) : quizQuestions.length === 0 ? (

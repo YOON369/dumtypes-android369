@@ -11,13 +11,23 @@ interface Subject {
   cardCount: number
 }
 
+interface SubjectProgress {
+  completedCards: string[]
+  stars: number
+  bestScore: number
+}
+
 interface Progress {
   totalXp: number
   level: number
   streak: number
   lastStudied: string | null
-  subjects: Record<string, { completedCards: string[]; stars: number; bestScore: number }>
+  subjects: Record<string, SubjectProgress>
   badges: string[]
+}
+
+const DEFAULT_PROGRESS: Progress = {
+  totalXp: 0, level: 1, streak: 0, lastStudied: null, subjects: {}, badges: [],
 }
 
 const LEVEL_NAMES = [
@@ -38,24 +48,31 @@ function getLevelEmoji(level: number) {
   return emojis[Math.min(Math.floor((level - 1) / 5), emojis.length - 1)]
 }
 
+function loadProgress(): Progress {
+  if (typeof window === 'undefined') return DEFAULT_PROGRESS
+  try {
+    const raw = localStorage.getItem('study-progress')
+    return raw ? { ...DEFAULT_PROGRESS, ...JSON.parse(raw) } : DEFAULT_PROGRESS
+  } catch {
+    return DEFAULT_PROGRESS
+  }
+}
+
 export default function HomePage() {
   const [subjects, setSubjects] = useState<Subject[]>([])
-  const [progress, setProgress] = useState<Progress>({
-    totalXp: 0, level: 1, streak: 0, lastStudied: null, subjects: {}, badges: [],
-  })
+  const [progress, setProgress] = useState<Progress>(DEFAULT_PROGRESS)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     async function load() {
       try {
-        const [sr, pr] = await Promise.all([fetch('/api/subjects'), fetch('/api/progress')])
-        setSubjects(await sr.json())
-        setProgress(await pr.json())
-      } catch (e) {
-        console.error(e)
-      } finally {
-        setLoading(false)
+        const res = await fetch('/api/subjects')
+        setSubjects(await res.json())
+      } catch {
+        // static fallback: subjects might be embedded
       }
+      setProgress(loadProgress())
+      setLoading(false)
     }
     load()
   }, [])

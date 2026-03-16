@@ -15,8 +15,9 @@ async function extractTextFromPDF(buffer: Buffer): Promise<string> {
   for (let i = 1; i <= doc.numPages; i++) {
     const page = await doc.getPage(i)
     const content = await page.getTextContent()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const pageText = content.items
-      .map((item: { str?: string }) => item.str || '')
+      .map((item: any) => item.str || '')
       .join(' ')
     if (pageText.trim()) {
       textParts.push(pageText.trim())
