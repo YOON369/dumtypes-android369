@@ -1,69 +1,39 @@
-import { StudyCard } from './storage'
 import { v4 as uuidv4 } from 'uuid'
+import type { StudyCard } from './storage'
 
-const CARD_MAX_WORDS = 180
+const MAX_WORDS = 180
 
-/**
- * Extract text from a PDF buffer using pdfjs-dist
- */
-async function extractTextFromPDF(buffer: Buffer): Promise<string> {
+async function extractText(buffer: Buffer): Promise<string> {
   const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.js')
-  const data = new Uint8Array(buffer)
-  const doc = await pdfjsLib.getDocument({ data, useSystemFonts: true }).promise
-
-  const textParts: string[] = []
+  const doc = await pdfjsLib.getDocument({ data: new Uint8Array(buffer), useSystemFonts: true }).promise
+  const parts: string[] = []
   for (let i = 1; i <= doc.numPages; i++) {
     const page = await doc.getPage(i)
     const content = await page.getTextContent()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const pageText = content.items
-      .map((item: any) => item.str || '')
-      .join(' ')
-    if (pageText.trim()) {
-      textParts.push(pageText.trim())
-    }
+    const text = content.items.map((item: any) => item.str || '').join(' ')
+    if (text.trim()) parts.push(text.trim())
   }
-  return textParts.join('\f')
+  return parts.join('\f')
 }
 
-/**
- * Accepts a Buffer (works on Vercel without writing to disk)
- */
 export async function extractCardsFromBuffer(buffer: Buffer): Promise<StudyCard[]> {
-  const rawText = await extractTextFromPDF(buffer)
+  const raw = await extractText(buffer)
   const cards: StudyCard[] = []
 
-  // Try form-feed page breaks first
-  let pages = rawText.split(/\f/).map((p: string) => p.trim()).filter((p: string) => p.length > 30)
-
-  // Fallback: triple newlines
+  let pages = raw.split(/\f/).map(p => p.trim()).filter(p => p.length > 30)
+  if (pages.length <= 1) pages = raw.split(/\n{3,}/).map(p => p.trim()).filter(p => p.length > 30)
   if (pages.length <= 1) {
-    pages = rawText.split(/\n{3,}/).map((p: string) => p.trim()).filter((p: string) => p.length > 30)
-  }
-
-  // Fallback: chunk whole text
-  if (pages.length <= 1) {
-    const words = rawText.trim().split(/\s+/)
-    const chunks: string[] = []
-    for (let i = 0; i < words.length; i += CARD_MAX_WORDS) {
-      const c = words.slice(i, i + CARD_MAX_WORDS).join(' ').trim()
-      if (c.length > 20) chunks.push(c)
-    }
+    const words = raw.trim().split(/\s+/), chunks: string[] = []
+    for (let i = 0; i < words.length; i += MAX_WORDS) { const c = words.slice(i, i + MAX_WORDS).join(' ').trim(); if (c.length > 20) chunks.push(c) }
     pages = chunks
   }
 
-  let pageNum = 1
+  let num = 1
   for (const page of pages) {
     const words = page.split(/\s+/)
-    if (words.length <= CARD_MAX_WORDS) {
-      cards.push({ id: uuidv4(), content: page, pageNum: pageNum++ })
-    } else {
-      for (let i = 0; i < words.length; i += CARD_MAX_WORDS) {
-        const chunk = words.slice(i, i + CARD_MAX_WORDS).join(' ').trim()
-        if (chunk.length > 20) cards.push({ id: uuidv4(), content: chunk, pageNum: pageNum++ })
-      }
-    }
+    if (words.length <= MAX_WORDS) { cards.push({ id: uuidv4(), content: page, pageNum: num++ }) }
+    else { for (let i = 0; i < words.length; i += MAX_WORDS) { const c = words.slice(i, i + MAX_WORDS).join(' ').trim(); if (c.length > 20) cards.push({ id: uuidv4(), content: c, pageNum: num++ }) } }
   }
-
   return cards
 }

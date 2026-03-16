@@ -8,39 +8,23 @@ export const maxDuration = 60
 
 export async function POST(request: NextRequest) {
   try {
-    const formData = await request.formData()
-    const file = formData.get('file') as File | null
-    const title = formData.get('title') as string | null
-    const description = (formData.get('description') as string) || ''
+    const fd = await request.formData()
+    const file = fd.get('file') as File | null
+    const title = fd.get('title') as string | null
+    const desc = (fd.get('description') as string) || ''
 
-    if (!file || !title) {
-      return NextResponse.json({ error: '파일과 제목은 필수입니다' }, { status: 400 })
-    }
-    if (!file.name.toLowerCase().endsWith('.pdf')) {
-      return NextResponse.json({ error: 'PDF 파일만 업로드 가능합니다' }, { status: 400 })
-    }
+    if (!file || !title) return NextResponse.json({ error: '파일과 제목은 필수입니다' }, { status: 400 })
+    if (!file.name.toLowerCase().endsWith('.pdf')) return NextResponse.json({ error: 'PDF 파일만 가능합니다' }, { status: 400 })
 
-    // Process directly from buffer (no disk write needed)
-    const bytes = await file.arrayBuffer()
-    const buffer = Buffer.from(bytes)
-
+    const buffer = Buffer.from(await file.arrayBuffer())
     const cards = await extractCardsFromBuffer(buffer)
-    if (cards.length === 0) {
-      return NextResponse.json({ error: 'PDF에서 텍스트를 추출할 수 없습니다' }, { status: 400 })
-    }
+    if (!cards.length) return NextResponse.json({ error: 'PDF에서 텍스트를 추출할 수 없습니다' }, { status: 400 })
 
     const id = uuidv4()
-    const subjects = await getSubjects()
-    subjects.push({
-      id,
-      title: title.trim(),
-      description: description.trim(),
-      createdAt: new Date().toISOString(),
-      cardCount: cards.length,
-      filename: file.name,
-    })
-    await saveSubjects(subjects)
-    await saveSubjectContent({ id, cards })
+    const subjects = getSubjects()
+    subjects.push({ id, title: title.trim(), description: desc.trim(), createdAt: new Date().toISOString(), cardCount: cards.length, filename: file.name })
+    saveSubjects(subjects)
+    saveSubjectContent({ id, cards })
 
     return NextResponse.json({ id, cardCount: cards.length })
   } catch (err) {

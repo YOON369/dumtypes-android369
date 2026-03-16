@@ -2,90 +2,36 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import { loadProgress, type Progress } from '@/lib/progress'
 
 interface Subject {
-  id: string
-  title: string
-  description: string
-  createdAt: string
-  cardCount: number
+  id: string; title: string; description: string; createdAt: string; cardCount: number
 }
 
-interface SubjectProgress {
-  completedCards: string[]
-  stars: number
-  bestScore: number
+const LEVELS = ['새싹','초보자','학습자','탐구자','분석가','전문가','마스터','달인','현인','전설']
+const EMOJIS = ['🌱','📗','📘','📙','🔥','⚡','💎','👑','🌟','🏆']
+
+function tier(level: number) {
+  const i = Math.min(Math.floor((level - 1) / 5), LEVELS.length - 1)
+  return { name: LEVELS[i], emoji: EMOJIS[i] }
 }
 
-interface Progress {
-  totalXp: number
-  level: number
-  streak: number
-  lastStudied: string | null
-  subjects: Record<string, SubjectProgress>
-  badges: string[]
-}
-
-const DEFAULT_PROGRESS: Progress = {
-  totalXp: 0, level: 1, streak: 0, lastStudied: null, subjects: {}, badges: [],
-}
-
-const LEVEL_NAMES = [
-  '새싹', '초보자', '학습자', '탐구자', '분석가',
-  '전문가', '마스터', '달인', '현인', '전설',
-]
-
-function getLevelName(level: number) {
-  return LEVEL_NAMES[Math.min(Math.floor((level - 1) / 5), LEVEL_NAMES.length - 1)]
-}
-
-function getXpForLevel(level: number) {
-  return (level - 1) * (level - 1) * 50
-}
-
-function getLevelEmoji(level: number) {
-  const emojis = ['🌱', '📗', '📘', '📙', '🔥', '⚡', '💎', '👑', '🌟', '🏆']
-  return emojis[Math.min(Math.floor((level - 1) / 5), emojis.length - 1)]
-}
-
-function loadProgress(): Progress {
-  if (typeof window === 'undefined') return DEFAULT_PROGRESS
-  try {
-    const raw = localStorage.getItem('study-progress')
-    return raw ? { ...DEFAULT_PROGRESS, ...JSON.parse(raw) } : DEFAULT_PROGRESS
-  } catch {
-    return DEFAULT_PROGRESS
-  }
-}
+function xpFor(level: number) { return (level - 1) ** 2 * 50 }
 
 export default function HomePage() {
   const [subjects, setSubjects] = useState<Subject[]>([])
-  const [progress, setProgress] = useState<Progress>(DEFAULT_PROGRESS)
+  const [progress, setProgress] = useState<Progress | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    async function load() {
-      try {
-        const res = await fetch('/api/subjects')
-        setSubjects(await res.json())
-      } catch {
-        // static fallback: subjects might be embedded
-      }
-      setProgress(loadProgress())
-      setLoading(false)
-    }
-    load()
+    fetch('/api/subjects').then(r => r.json()).then(setSubjects).catch(() => {})
+    setProgress(loadProgress())
+    setLoading(false)
   }, [])
 
-  const curLevelXp = getXpForLevel(progress.level)
-  const nextLevelXp = getXpForLevel(progress.level + 1)
-  const xpInLevel = progress.totalXp - curLevelXp
-  const xpNeeded = nextLevelXp - curLevelXp
-  const xpPercent = Math.min(Math.round((xpInLevel / xpNeeded) * 100), 100)
-
-  if (loading) {
+  if (loading || !progress) {
     return (
-      <div className="min-h-screen bg-[#0a0a1a] flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
           <div className="text-5xl mb-4 animate-bounce">📚</div>
           <div className="text-purple-400 text-lg animate-pulse">로딩 중...</div>
@@ -94,12 +40,16 @@ export default function HomePage() {
     )
   }
 
+  const { name, emoji } = tier(progress.level)
+  const cur = xpFor(progress.level), nxt = xpFor(progress.level + 1)
+  const inLevel = progress.totalXp - cur, needed = nxt - cur
+  const pct = Math.min(Math.round((inLevel / needed) * 100), 100)
+
   return (
-    <div className="min-h-screen bg-[#0a0a1a] pb-24">
-      {/* Header – Game HUD */}
+    <div className="min-h-screen pb-24">
+      {/* Header */}
       <div className="bg-gradient-to-b from-[#12082e] to-[#0a0a1a] px-4 pt-10 pb-6">
         <div className="max-w-md mx-auto">
-          {/* Title */}
           <h1 className="text-center text-2xl font-extrabold bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-transparent mb-6">
             📚 PDF 공부센터
           </h1>
@@ -107,14 +57,13 @@ export default function HomePage() {
           {/* Level card */}
           <div className="bg-[#1a1040]/80 border border-purple-500/30 rounded-2xl px-5 py-4 glow-purple">
             <div className="flex items-center gap-4 mb-3">
-              {/* Avatar */}
               <div className="w-14 h-14 rounded-full bg-gradient-to-br from-purple-600 to-blue-600 flex items-center justify-center text-2xl shadow-lg flex-shrink-0">
-                {getLevelEmoji(progress.level)}
+                {emoji}
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between">
                   <span className="text-purple-300 text-xs font-semibold uppercase tracking-wider">
-                    LV.{progress.level} {getLevelName(progress.level)}
+                    LV.{progress.level} {name}
                   </span>
                   {progress.streak > 0 && (
                     <span className="flex items-center gap-1 bg-orange-500/20 border border-orange-500/30 rounded-full px-2 py-0.5 text-orange-300 text-xs font-bold">
@@ -126,40 +75,29 @@ export default function HomePage() {
               </div>
             </div>
 
-            {/* XP Bar */}
             <div className="space-y-1">
               <div className="h-3 bg-gray-800 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-gradient-to-r from-purple-500 to-blue-500 rounded-full bar-fill transition-all duration-700"
-                  style={{ width: `${xpPercent}%` }}
-                />
+                <div className="h-full bg-gradient-to-r from-purple-500 to-blue-500 rounded-full bar-fill transition-all duration-700" style={{ width: `${pct}%` }} />
               </div>
               <div className="flex justify-between text-xs text-gray-500">
-                <span>{xpInLevel} XP</span>
-                <span>다음 레벨까지 {xpNeeded - xpInLevel} XP</span>
+                <span>{inLevel} XP</span>
+                <span>다음 레벨까지 {needed - inLevel} XP</span>
               </div>
             </div>
           </div>
 
-          {/* Stats row */}
+          {/* Stats */}
           {subjects.length > 0 && (
             <div className="grid grid-cols-3 gap-2 mt-3">
               {[
                 { label: '자료', value: subjects.length, icon: '📄' },
-                {
-                  label: '완료',
-                  value: subjects.filter(s => {
-                    const p = progress.subjects[s.id]
-                    return p && p.completedCards.length >= s.cardCount
-                  }).length,
-                  icon: '✅',
-                },
+                { label: '완료', value: subjects.filter(s => { const p = progress.subjects[s.id]; return p && p.completedCards.length >= s.cardCount }).length, icon: '✅' },
                 { label: '뱃지', value: progress.badges?.length || 0, icon: '🏅' },
-              ].map(stat => (
-                <div key={stat.label} className="bg-[#1a1a2a] rounded-xl p-3 text-center">
-                  <div className="text-xl">{stat.icon}</div>
-                  <div className="text-white font-bold text-lg leading-none mt-1">{stat.value}</div>
-                  <div className="text-gray-500 text-xs mt-0.5">{stat.label}</div>
+              ].map(s => (
+                <div key={s.label} className="bg-[#1a1a2a] rounded-xl p-3 text-center">
+                  <div className="text-xl">{s.icon}</div>
+                  <div className="text-white font-bold text-lg leading-none mt-1">{s.value}</div>
+                  <div className="text-gray-500 text-xs mt-0.5">{s.label}</div>
                 </div>
               ))}
             </div>
@@ -187,49 +125,25 @@ export default function HomePage() {
               const done = sp?.completedCards?.length || 0
               const pct = Math.round((done / subject.cardCount) * 100)
               const stars = sp?.stars || 0
-
               return (
                 <Link key={subject.id} href={`/study/${subject.id}`}>
                   <div className="bg-gradient-to-r from-[#14142a] to-[#12121f] border border-purple-500/20 rounded-2xl p-4 active:scale-[0.97] transition-transform duration-100 cursor-pointer">
                     <div className="flex items-start justify-between mb-2">
                       <div className="flex-1 min-w-0 mr-2">
                         <h3 className="font-bold text-white text-base truncate">{subject.title}</h3>
-                        {subject.description && (
-                          <p className="text-gray-500 text-xs mt-0.5 line-clamp-1">{subject.description}</p>
-                        )}
+                        {subject.description && <p className="text-gray-500 text-xs mt-0.5 line-clamp-1">{subject.description}</p>}
                       </div>
-                      {stars > 0 && (
-                        <div className="text-yellow-400 text-sm flex-shrink-0">{'⭐'.repeat(stars)}</div>
-                      )}
+                      {stars > 0 && <div className="text-yellow-400 text-sm flex-shrink-0">{'⭐'.repeat(stars)}</div>}
                     </div>
-
-                    {/* Progress bar */}
                     <div className="flex items-center gap-2 mb-2">
                       <div className="flex-1 h-2 bg-gray-800 rounded-full overflow-hidden">
-                        <div
-                          className="h-full rounded-full transition-all duration-500"
-                          style={{
-                            width: `${pct}%`,
-                            background: pct === 100
-                              ? 'linear-gradient(to right, #22c55e, #16a34a)'
-                              : 'linear-gradient(to right, #8b5cf6, #3b82f6)',
-                          }}
-                        />
+                        <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, background: pct === 100 ? 'linear-gradient(to right, #22c55e, #16a34a)' : 'linear-gradient(to right, #8b5cf6, #3b82f6)' }} />
                       </div>
-                      <span className="text-xs text-gray-500 whitespace-nowrap tabular-nums">
-                        {done}/{subject.cardCount}
-                      </span>
+                      <span className="text-xs text-gray-500 whitespace-nowrap tabular-nums">{done}/{subject.cardCount}</span>
                     </div>
-
                     <div className="flex items-center justify-between">
                       <span className="text-xs text-gray-600">📋 카드 {subject.cardCount}장</span>
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                        pct === 100
-                          ? 'bg-green-500/20 text-green-400'
-                          : pct > 0
-                            ? 'bg-blue-500/20 text-blue-400'
-                            : 'bg-gray-700/50 text-gray-500'
-                      }`}>
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${pct === 100 ? 'bg-green-500/20 text-green-400' : pct > 0 ? 'bg-blue-500/20 text-blue-400' : 'bg-gray-700/50 text-gray-500'}`}>
                         {pct === 100 ? '완료 ✓' : pct > 0 ? `${pct}% 진행` : '시작 전'}
                       </span>
                     </div>
