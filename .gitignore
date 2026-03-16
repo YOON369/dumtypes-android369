@@ -1,0 +1,21 @@
+# Next.js
+.next/
+out/
+node_modules/
+
+# Data & uploads (runtime)
+data/
+uploads/
+
+# Env
+.env
+.env.local
+.env*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
