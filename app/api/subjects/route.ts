@@ -4,6 +4,6 @@ import { getSubjects } from '@/lib/storage'
 export const dynamic = 'force-dynamic'
 
 export async function GET() {
-  const subjects = getSubjects()
+  const subjects = await getSubjects()
   return NextResponse.json(subjects)
 }
